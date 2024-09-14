@@ -15,18 +15,75 @@ import shutil
 import sys
 from datetime import datetime
 import exif
-from tqdm import tqdm
 import concurrent.futures
 import threading
 import asyncio
-import aiofiles
+import curses
 
-async def process_file(file_path, source_folder, update_names):
+# Global variables for curses output
+stdscr = None
+log_window = None
+progress_window = None
+status_window = None
+processed_files = 0
+total_files = 0
+current_file = ""
+latest_logs = []
+
+def setup_curses():
+    global stdscr, log_window, progress_window, status_window
+    stdscr = curses.initscr()
+    curses.noecho()
+    curses.cbreak()
+    stdscr.keypad(True)
+    curses.start_color()
+    curses.use_default_colors()
+    curses.init_pair(1, curses.COLOR_GREEN, -1)
+    
+    height, width = stdscr.getmaxyx()
+    log_window = curses.newwin(height - 4, width, 0, 0)
+    progress_window = curses.newwin(2, width, height - 4, 0)
+    status_window = curses.newwin(2, width, height - 2, 0)
+
+def end_curses():
+    curses.nocbreak()
+    stdscr.keypad(False)
+    curses.echo()
+    curses.endwin()
+
+def update_display():
+    global log_window, progress_window, status_window, processed_files, total_files, current_file, latest_logs
+    
+    log_window.clear()
+    for i, log in enumerate(latest_logs[-10:]):  # Show last 10 log entries
+        log_window.addstr(i, 0, log[:log_window.getmaxyx()[1]-1])
+    log_window.refresh()
+    
+    progress_window.clear()
+    progress_percent = (processed_files / total_files) * 100 if total_files > 0 else 0
+    progress_window.addstr(0, 0, f"Progress: [{processed_files}/{total_files}] {progress_percent:.2f}%")
+    progress_window.addstr(1, 0, f"Current file: {current_file[:progress_window.getmaxyx()[1]-1]}", curses.color_pair(1))
+    progress_window.refresh()
+    
+    status_window.clear()
+    status_window.addstr(0, 0, "Press 'q' to quit")
+    status_window.refresh()
+
+def log_message(message):
+    global latest_logs
+    latest_logs.append(message)
+    if len(latest_logs) > 100:  # Keep only last 100 log entries
+        latest_logs.pop(0)
+    update_display()
+
+def process_file(file_path, source_folder, update_names):
+    global processed_files, current_file
     thread_id = threading.get_ident()
+    current_file = file_path
+    log_message(f"Thread {thread_id}: Starting to process {file_path}")
     try:
-        async with aiofiles.open(file_path, 'rb') as image_file:
-            image_data = await image_file.read()
-            image = exif.Image(image_data)
+        with open(file_path, 'rb') as image_file:
+            image = exif.Image(image_file)
         
         try:
             if image.has_exif and hasattr(image, 'datetime_original'):
@@ -52,8 +109,11 @@ async def process_file(file_path, source_folder, update_names):
         
         destination_path = os.path.join(month_folder, new_filename)
         
-        await aiofiles.os.copy(file_path, destination_path)
+        log_message(f"Thread {thread_id}: Copying {filename} to {destination_path}")
+        shutil.copy2(file_path, destination_path)
         
+        processed_files += 1
+        update_display()
         return f"Thread {thread_id}: Copied {filename} to {destination_path}"
     except Exception as e:
         return f"Thread {thread_id}: Error processing {file_path}: {str(e)}"
@@ -64,36 +124,56 @@ def get_image_files(source_folder):
         for file in files:
             if file.lower().endswith(('.dng', '.cr2', '.jpg', '.jpeg')):
                 image_files.append(os.path.join(root, file))
-    print(f"Found {len(image_files)} image files (.dng, .cr2, .jpg, .jpeg).")
+    log_message(f"Found {len(image_files)} image files (.dng, .cr2, .jpg, .jpeg).")
     return image_files
 
 async def sort_photos(source_folder, update_names):
-    print(f"Scanning folder: {source_folder}")
+    global total_files
+    log_message(f"Scanning folder: {source_folder}")
     image_files = get_image_files(source_folder)
+    total_files = len(image_files)
     
     if not image_files:
-        print("No image files found. Exiting.")
+        log_message("No image files found. Exiting.")
         return
 
-    tasks = [process_file(file, source_folder, update_names) for file in image_files]
-    
-    with tqdm(total=len(image_files), desc="Sorting photos", unit="file") as pbar:
-        for task in asyncio.as_completed(tasks):
+    loop = asyncio.get_running_loop()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(32, os.cpu_count() + 4)) as executor:
+        futures = [loop.run_in_executor(executor, process_file, file, source_folder, update_names) for file in image_files]
+        for future in asyncio.as_completed(futures):
             try:
-                result = await task
-                print(result)
+                result = await future
+                log_message(result)
             except Exception as exc:
-                print(f'Error: {exc}')
-            finally:
-                pbar.update(1)
+                log_message(f'Error: {exc}')
 
     # Delete original files after successful copy
     for file in image_files:
         try:
             os.remove(file)
-            print(f"Deleted original file: {file}")
+            log_message(f"Deleted original file: {file}")
         except Exception as e:
-            print(f"Error deleting {file}: {str(e)}")
+            log_message(f"Error deleting {file}: {str(e)}")
+
+async def main(source_folder, update_names):
+    try:
+        setup_curses()
+        log_message(f"Starting photo sorting in: {source_folder}")
+        log_message(f"Update names: {'Yes' if update_names else 'No'}")
+        log_message(f"Number of CPU cores: {os.cpu_count()}")
+        
+        await sort_photos(source_folder, update_names)
+        
+        log_message("\nPhoto sorting completed.")
+        
+        # Wait for 'q' key press to exit
+        while True:
+            if status_window.getch() == ord('q'):
+                break
+    except Exception as e:
+        log_message(f"An error occurred: {str(e)}")
+    finally:
+        end_curses()
 
 if __name__ == "__main__":
     if len(sys.argv) < 2 or len(sys.argv) > 3:
@@ -107,9 +187,4 @@ if __name__ == "__main__":
     
     update_names = len(sys.argv) == 3 and sys.argv[2].lower() == 'updatenames'
     
-    print(f"Starting photo sorting in: {source_folder}")
-    print(f"Update names: {'Yes' if update_names else 'No'}")
-    
-    asyncio.run(sort_photos(source_folder, update_names))
-    
-    print("\nPhoto sorting completed.")
+    asyncio.run(main(source_folder, update_names))
