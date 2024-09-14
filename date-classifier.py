@@ -17,11 +17,8 @@ from datetime import datetime
 import exif
 from tqdm import tqdm
 import concurrent.futures
-import cProfile
-import pstats
-import io
 
-def process_file(file_path, source_folder):
+def process_file(file_path, source_folder, update_names):
     try:
         with open(file_path, 'rb') as image_file:
             image = exif.Image(image_file)
@@ -38,9 +35,15 @@ def process_file(file_path, source_folder):
         os.makedirs(month_folder, exist_ok=True)
         
         filename = os.path.basename(file_path)
-        destination_path = os.path.join(month_folder, filename)
+        file_name, file_extension = os.path.splitext(filename)
         
-        # Copy instead of move
+        if update_names:
+            new_filename = f"{date_time.strftime('%Y-%m-%d-%H%M%S')}_{file_name}{file_extension}"
+        else:
+            new_filename = filename
+        
+        destination_path = os.path.join(month_folder, new_filename)
+        
         shutil.copy2(file_path, destination_path)
         
         return f"Copied {filename} to {destination_path}"
@@ -56,7 +59,7 @@ def get_raw_files(source_folder):
     print(f"Found {len(raw_files)} raw files (.dng and .cr2).")
     return raw_files
 
-def sort_photos(source_folder):
+def sort_photos(source_folder, update_names):
     print(f"Scanning folder: {source_folder}")
     raw_files = get_raw_files(source_folder)
     
@@ -65,7 +68,7 @@ def sort_photos(source_folder):
         return
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        future_to_file = {executor.submit(process_file, file, source_folder): file for file in raw_files}
+        future_to_file = {executor.submit(process_file, file, source_folder, update_names): file for file in raw_files}
         
         with tqdm(total=len(raw_files), desc="Sorting photos", unit="file") as pbar:
             for future in concurrent.futures.as_completed(future_to_file):
@@ -87,8 +90,8 @@ def sort_photos(source_folder):
             print(f"Error deleting {file}: {str(e)}")
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python script_name.py <source_folder>")
+    if len(sys.argv) < 2 or len(sys.argv) > 3:
+        print("Usage: python script_name.py <source_folder> [updatenames]")
         sys.exit(1)
     
     source_folder = os.path.abspath(sys.argv[1])
@@ -96,19 +99,11 @@ if __name__ == "__main__":
         print(f"Error: {source_folder} is not a valid directory")
         sys.exit(1)
     
+    update_names = len(sys.argv) == 3 and sys.argv[2].lower() == 'updatenames'
+    
     print(f"Starting photo sorting in: {source_folder}")
+    print(f"Update names: {'Yes' if update_names else 'No'}")
     
-    # Profile the script
-    pr = cProfile.Profile()
-    pr.enable()
-    
-    sort_photos(source_folder)
-    
-    pr.disable()
-    s = io.StringIO()
-    sortby = 'cumulative'
-    ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
-    ps.print_stats()
-    print(s.getvalue())
+    sort_photos(source_folder, update_names)
     
     print("\nPhoto sorting completed.")
