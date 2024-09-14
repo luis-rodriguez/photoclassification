@@ -18,14 +18,17 @@ import exif
 from tqdm import tqdm
 import concurrent.futures
 import threading
+import asyncio
+import aiofiles
 
-def process_file(file_path, source_folder, update_names):
+async def process_file(file_path, source_folder, update_names):
     thread_id = threading.get_ident()
     try:
+        async with aiofiles.open(file_path, 'rb') as image_file:
+            image_data = await image_file.read()
+            image = exif.Image(image_data)
+        
         try:
-            with open(file_path, 'rb') as image_file:
-                image = exif.Image(image_file)
-            
             if image.has_exif and hasattr(image, 'datetime_original'):
                 date_time_str = image.datetime_original
                 date_time = datetime.strptime(date_time_str, "%Y:%m:%d %H:%M:%S")
@@ -49,7 +52,7 @@ def process_file(file_path, source_folder, update_names):
         
         destination_path = os.path.join(month_folder, new_filename)
         
-        shutil.copy2(file_path, destination_path)
+        await aiofiles.os.copy(file_path, destination_path)
         
         return f"Thread {thread_id}: Copied {filename} to {destination_path}"
     except Exception as e:
@@ -64,7 +67,7 @@ def get_image_files(source_folder):
     print(f"Found {len(image_files)} image files (.dng, .cr2, .jpg, .jpeg).")
     return image_files
 
-def sort_photos(source_folder, update_names):
+async def sort_photos(source_folder, update_names):
     print(f"Scanning folder: {source_folder}")
     image_files = get_image_files(source_folder)
     
@@ -72,19 +75,17 @@ def sort_photos(source_folder, update_names):
         print("No image files found. Exiting.")
         return
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        future_to_file = {executor.submit(process_file, file, source_folder, update_names): file for file in image_files}
-        
-        with tqdm(total=len(image_files), desc="Sorting photos", unit="file") as pbar:
-            for future in concurrent.futures.as_completed(future_to_file):
-                file = future_to_file[future]
-                try:
-                    result = future.result()
-                    print(result)
-                except Exception as exc:
-                    print(f'Thread {threading.get_ident()}: {file} generated an exception: {exc}')
-                finally:
-                    pbar.update(1)
+    tasks = [process_file(file, source_folder, update_names) for file in image_files]
+    
+    with tqdm(total=len(image_files), desc="Sorting photos", unit="file") as pbar:
+        for task in asyncio.as_completed(tasks):
+            try:
+                result = await task
+                print(result)
+            except Exception as exc:
+                print(f'Error: {exc}')
+            finally:
+                pbar.update(1)
 
     # Delete original files after successful copy
     for file in image_files:
@@ -108,8 +109,7 @@ if __name__ == "__main__":
     
     print(f"Starting photo sorting in: {source_folder}")
     print(f"Update names: {'Yes' if update_names else 'No'}")
-    print(f"Number of CPU cores: {os.cpu_count()}")
     
-    sort_photos(source_folder, update_names)
+    asyncio.run(sort_photos(source_folder, update_names))
     
     print("\nPhoto sorting completed.")
