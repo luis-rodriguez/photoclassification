@@ -17,8 +17,10 @@ from datetime import datetime
 import exif
 from tqdm import tqdm
 import concurrent.futures
+import threading
 
 def process_file(file_path, source_folder, update_names):
+    thread_id = threading.get_ident()
     try:
         try:
             with open(file_path, 'rb') as image_file:
@@ -30,7 +32,6 @@ def process_file(file_path, source_folder, update_names):
             else:
                 raise ValueError("No valid EXIF data")
         except (ValueError, AttributeError):
-            # If there's an error reading EXIF, use file modification time
             date_time = datetime.fromtimestamp(os.path.getmtime(file_path))
         
         year_folder = os.path.join(source_folder, str(date_time.year))
@@ -50,9 +51,9 @@ def process_file(file_path, source_folder, update_names):
         
         shutil.copy2(file_path, destination_path)
         
-        return f"Copied {filename} to {destination_path}"
+        return f"Thread {thread_id}: Copied {filename} to {destination_path}"
     except Exception as e:
-        return f"Error processing {file_path}: {str(e)}"
+        return f"Thread {thread_id}: Error processing {file_path}: {str(e)}"
 
 def get_raw_files(source_folder):
     raw_files = []
@@ -81,7 +82,7 @@ def sort_photos(source_folder, update_names):
                     result = future.result()
                     print(result)
                 except Exception as exc:
-                    print(f'{file} generated an exception: {exc}')
+                    print(f'Thread {threading.get_ident()}: {file} generated an exception: {exc}')
                 finally:
                     pbar.update(1)
 
@@ -107,6 +108,7 @@ if __name__ == "__main__":
     
     print(f"Starting photo sorting in: {source_folder}")
     print(f"Update names: {'Yes' if update_names else 'No'}")
+    print(f"Number of CPU cores: {os.cpu_count()}")
     
     sort_photos(source_folder, update_names)
     
