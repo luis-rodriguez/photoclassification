@@ -20,13 +20,17 @@ import concurrent.futures
 
 def process_file(file_path, source_folder, update_names):
     try:
-        with open(file_path, 'rb') as image_file:
-            image = exif.Image(image_file)
-        
-        if image.has_exif and hasattr(image, 'datetime_original'):
-            date_time_str = image.datetime_original
-            date_time = datetime.strptime(date_time_str, "%Y:%m:%d %H:%M:%S")
-        else:
+        try:
+            with open(file_path, 'rb') as image_file:
+                image = exif.Image(image_file)
+            
+            if image.has_exif and hasattr(image, 'datetime_original'):
+                date_time_str = image.datetime_original
+                date_time = datetime.strptime(date_time_str, "%Y:%m:%d %H:%M:%S")
+            else:
+                raise ValueError("No valid EXIF data")
+        except (ValueError, AttributeError):
+            # If there's an error reading EXIF, use file modification time
             date_time = datetime.fromtimestamp(os.path.getmtime(file_path))
         
         year_folder = os.path.join(source_folder, str(date_time.year))
