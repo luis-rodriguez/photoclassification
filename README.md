@@ -58,8 +58,3 @@ Feel free to fork this repository and submit pull requests with any enhancements
 ## License
 
 [MIT License](LICENSE)
-```
-
-This README provides an overview of the script, its features, requirements, installation instructions, usage, and how it works. It also includes some notes and information about contributing.
-
-You may want to adjust any details to better fit your specific implementation or add any additional information you think would be helpful for users of your script. Also, consider creating a LICENSE file if you haven't already, and link to it in the README as shown.
