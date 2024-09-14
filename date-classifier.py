@@ -17,6 +17,9 @@ from datetime import datetime
 import exif
 from tqdm import tqdm
 import concurrent.futures
+import cProfile
+import pstats
+import io
 
 def process_file(file_path, source_folder):
     try:
@@ -36,9 +39,11 @@ def process_file(file_path, source_folder):
         
         filename = os.path.basename(file_path)
         destination_path = os.path.join(month_folder, filename)
-        shutil.move(file_path, destination_path)
         
-        return f"Moved {filename} to {destination_path}"
+        # Copy instead of move
+        shutil.copy2(file_path, destination_path)
+        
+        return f"Copied {filename} to {destination_path}"
     except Exception as e:
         return f"Error processing {file_path}: {str(e)}"
 
@@ -73,6 +78,14 @@ def sort_photos(source_folder):
                 finally:
                     pbar.update(1)
 
+    # Delete original files after successful copy
+    for file in raw_files:
+        try:
+            os.remove(file)
+            print(f"Deleted original file: {file}")
+        except Exception as e:
+            print(f"Error deleting {file}: {str(e)}")
+
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: python script_name.py <source_folder>")
@@ -84,5 +97,18 @@ if __name__ == "__main__":
         sys.exit(1)
     
     print(f"Starting photo sorting in: {source_folder}")
+    
+    # Profile the script
+    pr = cProfile.Profile()
+    pr.enable()
+    
     sort_photos(source_folder)
+    
+    pr.disable()
+    s = io.StringIO()
+    sortby = 'cumulative'
+    ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
+    ps.print_stats()
+    print(s.getvalue())
+    
     print("\nPhoto sorting completed.")
