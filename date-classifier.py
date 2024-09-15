@@ -19,6 +19,8 @@ import concurrent.futures
 import threading
 import asyncio
 import curses
+from collections import defaultdict
+import gc
 
 # Global variables for curses output
 stdscr = None
@@ -29,6 +31,12 @@ processed_files = 0
 total_files = 0
 current_file = ""
 latest_logs = []
+
+# Abort flag
+abort_event = threading.Event()
+
+# Batch size for processing
+BATCH_SIZE = 200
 
 def setup_curses():
     global stdscr, log_window, progress_window, status_window
@@ -76,11 +84,13 @@ def log_message(message):
         latest_logs.pop(0)
     update_display()
 
-def process_file(file_path, source_folder, update_names):
+def analyze_file(file_path, source_folder, update_names):
     global processed_files, current_file
+    if abort_event.is_set():
+        return None
     thread_id = threading.get_ident()
     current_file = file_path
-    log_message(f"Thread {thread_id}: Starting to process {file_path}")
+    log_message(f"Thread {thread_id}: Analyzing {file_path}")
     try:
         with open(file_path, 'rb') as image_file:
             image = exif.Image(image_file)
@@ -97,8 +107,6 @@ def process_file(file_path, source_folder, update_names):
         year_folder = os.path.join(source_folder, str(date_time.year))
         month_folder = os.path.join(year_folder, f"{date_time.month:02d}")
         
-        os.makedirs(month_folder, exist_ok=True)
-        
         filename = os.path.basename(file_path)
         file_name, file_extension = os.path.splitext(filename)
         
@@ -109,14 +117,12 @@ def process_file(file_path, source_folder, update_names):
         
         destination_path = os.path.join(month_folder, new_filename)
         
-        log_message(f"Thread {thread_id}: Copying {filename} to {destination_path}")
-        shutil.copy2(file_path, destination_path)
-        
         processed_files += 1
         update_display()
-        return f"Thread {thread_id}: Copied {filename} to {destination_path}"
+        return (file_path, destination_path)
     except Exception as e:
-        return f"Thread {thread_id}: Error processing {file_path}: {str(e)}"
+        log_message(f"Thread {thread_id}: Error analyzing {file_path}: {str(e)}")
+        return None
 
 def get_image_files(source_folder):
     image_files = []
@@ -127,7 +133,7 @@ def get_image_files(source_folder):
     log_message(f"Found {len(image_files)} image files (.dng, .cr2, .jpg, .jpeg).")
     return image_files
 
-async def sort_photos(source_folder, update_names):
+async def analyze_photos(source_folder, update_names):
     global total_files
     log_message(f"Scanning folder: {source_folder}")
     image_files = get_image_files(source_folder)
@@ -135,41 +141,86 @@ async def sort_photos(source_folder, update_names):
     
     if not image_files:
         log_message("No image files found. Exiting.")
-        return
+        return []
 
-    loop = asyncio.get_running_loop()
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(32, os.cpu_count() + 4)) as executor:
-        futures = [loop.run_in_executor(executor, process_file, file, source_folder, update_names) for file in image_files]
-        for future in asyncio.as_completed(futures):
-            try:
-                result = await future
-                log_message(result)
-            except Exception as exc:
-                log_message(f'Error: {exc}')
+    all_results = []
+    for i in range(0, len(image_files), BATCH_SIZE):
+        batch = image_files[i:i+BATCH_SIZE]
+        loop = asyncio.get_running_loop()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(32, os.cpu_count() + 4)) as executor:
+            futures = [loop.run_in_executor(executor, analyze_file, file, source_folder, update_names) for file in batch]
+            results = []
+            for future in asyncio.as_completed(futures):
+                if abort_event.is_set():
+                    break
+                try:
+                    result = await future
+                    if result:
+                        results.append(result)
+                except Exception as exc:
+                    log_message(f'Error: {exc}')
+            all_results.extend(results)
+        
+        # Perform garbage collection after each batch
+        gc.collect()
+        
+        if abort_event.is_set():
+            break
+    
+    return all_results
 
-    # Delete original files after successful copy
-    for file in image_files:
+def execute_file_operations(operations):
+    log_message("Executing file operations...")
+    for source, destination in operations:
+        if abort_event.is_set():
+            break
         try:
-            os.remove(file)
-            log_message(f"Deleted original file: {file}")
+            os.makedirs(os.path.dirname(destination), exist_ok=True)
+            shutil.copy2(source, destination)
+            log_message(f"Copied {source} to {destination}")
         except Exception as e:
-            log_message(f"Error deleting {file}: {str(e)}")
+            log_message(f"Error copying {source}: {str(e)}")
+
+    if not abort_event.is_set():
+        log_message("Deleting original files...")
+        for source, _ in operations:
+            if abort_event.is_set():
+                break
+            try:
+                os.remove(source)
+                log_message(f"Deleted original file: {source}")
+            except Exception as e:
+                log_message(f"Error deleting {source}: {str(e)}")
+
+def input_thread(stdscr):
+    while True:
+        c = stdscr.getch()
+        if c == ord('q'):
+            abort_event.set()
+            break
 
 async def main(source_folder, update_names):
     try:
         setup_curses()
-        log_message(f"Starting photo sorting in: {source_folder}")
+        log_message(f"Starting photo analysis in: {source_folder}")
         log_message(f"Update names: {'Yes' if update_names else 'No'}")
         log_message(f"Number of CPU cores: {os.cpu_count()}")
         
-        await sort_photos(source_folder, update_names)
+        # Start input thread
+        input_thread_handle = threading.Thread(target=input_thread, args=(stdscr,))
+        input_thread_handle.start()
         
-        log_message("\nPhoto sorting completed.")
+        operations = await analyze_photos(source_folder, update_names)
         
-        # Wait for 'q' key press to exit
-        while True:
-            if status_window.getch() == ord('q'):
-                break
+        if abort_event.is_set():
+            log_message("Operation aborted by user.")
+        else:
+            log_message("\nAnalysis completed. Starting file operations...")
+            execute_file_operations(operations)
+            log_message("\nPhoto sorting completed.")
+        
+        log_message("Press any key to exit...")
+        stdscr.getch()
     except Exception as e:
         log_message(f"An error occurred: {str(e)}")
     finally:
