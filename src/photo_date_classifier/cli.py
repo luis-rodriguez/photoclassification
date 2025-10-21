@@ -1,8 +1,9 @@
 """Command-line interface for photo-date-classifier."""
+
 import json
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 import click
 import yaml
@@ -12,33 +13,35 @@ from .concurrency import process_files_concurrently
 from .exif_reader import extract_photo_metadata
 from .hashing import compute_file_hash
 from .logging_setup import get_logger, setup_logging
-from .models import ClassificationResult, Config, DuplicatePolicy, Operation
+from .models import Config, DuplicatePolicy, Operation
 from .organizer import classify_photo, execute_operation
 
 logger = get_logger()
 
 
-def find_photo_files(source: Path, extensions: List[str], follow_symlinks: bool = False) -> List[Path]:
+def find_photo_files(
+    source: Path, extensions: list[str], follow_symlinks: bool = False
+) -> list[Path]:
     """
     Find all photo files in a directory tree.
-    
+
     Args:
         source: Source directory
         extensions: List of file extensions to include
         follow_symlinks: Whether to follow symbolic links
-        
+
     Returns:
         List of photo file paths
     """
     photo_files = []
-    
+
     for item in source.rglob("*"):
         if item.is_file():
             if not follow_symlinks and item.is_symlink():
                 continue
             if item.suffix.lower() in extensions:
                 photo_files.append(item)
-    
+
     return photo_files
 
 
@@ -137,22 +140,22 @@ def classify(
     """Classify and organize photos by date."""
     # Setup logging
     setup_logging(log_level, json_output)
-    
+
     # Load config from file if provided
     if config:
         try:
             with open(config) as f:
-                config_data = yaml.safe_load(f)
+                yaml.safe_load(f)
             logger.info(f"Loaded configuration from {config}")
             # Override with config file values where not explicitly set
             # (CLI args take precedence)
         except Exception as e:
             logger.error(f"Failed to load config file: {e}")
             sys.exit(1)
-    
+
     # Parse extensions
     ext_list = [ext.strip() for ext in extensions.split(",")]
-    
+
     # Create configuration
     try:
         cfg = Config(
@@ -172,21 +175,21 @@ def classify(
     except Exception as e:
         logger.error(f"Invalid configuration: {e}")
         sys.exit(1)
-    
+
     logger.info(f"Classifying photos from {source} to {dest}")
     logger.info(f"Structure template: {structure}")
     logger.info(f"Operation: {operation} (dry_run={dry_run})")
-    
+
     # Find photo files
     logger.info("Scanning for photo files...")
     photo_files = find_photo_files(source, cfg.extensions, cfg.follow_symlinks)
-    
+
     if not photo_files:
         logger.warning("No photo files found matching criteria")
         return
-    
+
     logger.info(f"Found {len(photo_files)} photo files")
-    
+
     # Extract metadata from all photos
     logger.info("Extracting metadata...")
     photos = process_files_concurrently(
@@ -195,30 +198,30 @@ def classify(
         max_workers=cfg.concurrency,
         desc="Reading EXIF data",
     )
-    
+
     # Classify photos
     logger.info("Classifying photos...")
-    
+
     def classify_with_config(photo):  # type: ignore
         return classify_photo(photo, cfg)
-    
+
     results = process_files_concurrently(
         photos,
         classify_with_config,
         max_workers=cfg.concurrency,
         desc="Classifying photos",
     )
-    
+
     # Filter out errors and skipped
     successful_results = [r for r in results if not r.error and not r.skipped]
     skipped_results = [r for r in results if r.skipped]
     error_results = [r for r in results if r.error]
-    
-    logger.info(f"Classification complete:")
+
+    logger.info("Classification complete:")
     logger.info(f"  - Successful: {len(successful_results)}")
     logger.info(f"  - Skipped: {len(skipped_results)}")
     logger.info(f"  - Errors: {len(error_results)}")
-    
+
     # Execute operations
     if not dry_run and successful_results:
         logger.info("Executing file operations...")
@@ -227,7 +230,7 @@ def classify(
                 execute_operation(result, cfg)
             except Exception as e:
                 logger.error(f"Failed to process {result.source}: {e}")
-    
+
     # Output summary
     if json_output:
         output = {
@@ -251,7 +254,7 @@ def classify(
             logger.info("\n[DRY RUN] No changes were made")
         else:
             logger.info("\nClassification complete!")
-    
+
     # Exit with error code if there were errors
     if error_results:
         sys.exit(1)
@@ -297,10 +300,10 @@ def plan(
 ) -> None:
     """Generate a classification plan without making changes."""
     setup_logging("INFO", json_output)
-    
+
     # Parse extensions
     ext_list = [ext.strip() for ext in extensions.split(",")]
-    
+
     # Create configuration with dry_run enabled
     cfg = Config(
         source=source,
@@ -310,16 +313,16 @@ def plan(
         dry_run=True,
         concurrency=4,
     )
-    
+
     logger.info("Generating classification plan...")
-    
+
     # Find and process photos
     photo_files = find_photo_files(source, cfg.extensions, False)
-    
+
     if not photo_files:
         logger.warning("No photo files found")
         return
-    
+
     photos = process_files_concurrently(
         photo_files,
         extract_photo_metadata,
@@ -327,10 +330,10 @@ def plan(
         desc="Reading EXIF data",
         show_progress=not json_output,
     )
-    
+
     def classify_with_config(photo):  # type: ignore
         return classify_photo(photo, cfg)
-    
+
     results = process_files_concurrently(
         photos,
         classify_with_config,
@@ -338,7 +341,7 @@ def plan(
         desc="Planning classification",
         show_progress=not json_output,
     )
-    
+
     # Output plan
     if json_output:
         output = {
@@ -384,21 +387,21 @@ def plan(
 def hash(directory: Path, extensions: str, algorithm: str) -> None:
     """Compute and list file hashes."""
     setup_logging("INFO", False)
-    
+
     ext_list = [ext.strip() for ext in extensions.split(",")]
-    
+
     logger.info(f"Computing {algorithm} hashes for files in {directory}")
-    
+
     # Find files
     files = []
     for item in directory.rglob("*"):
         if item.is_file() and item.suffix.lower() in ext_list:
             files.append(item)
-    
+
     if not files:
         logger.warning("No files found")
         return
-    
+
     # Compute hashes
     for file in files:
         try:

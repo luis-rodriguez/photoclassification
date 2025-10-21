@@ -1,4 +1,5 @@
 """Data models for photo classification."""
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -34,7 +35,7 @@ class Photo:
     content_hash: Optional[str] = None
     exif_source: str = "unknown"  # datetime_original, create_date, modify_date, mtime
     iso: Optional[int] = None
-    
+
     def __post_init__(self) -> None:
         """Initialize computed fields."""
         if not self.path.exists():
@@ -64,7 +65,9 @@ class Config:
     source: Path
     destination: Path
     structure_template: str = "{year}/{month}"
-    extensions: list[str] = field(default_factory=lambda: [".dng", ".cr2", ".nef", ".arw", ".raf", ".orf", ".rw2"])
+    extensions: list[str] = field(
+        default_factory=lambda: [".dng", ".cr2", ".nef", ".arw", ".raf", ".orf", ".rw2"]
+    )
     rename_pattern: Optional[str] = None  # e.g., "{year}-{month}-{day}-{time}_{original}"
     operation: Operation = Operation.MOVE
     dry_run: bool = False
@@ -74,14 +77,15 @@ class Config:
     log_level: str = "INFO"
     json_output: bool = False
     config_file: Optional[Path] = None
-    
+
     def __post_init__(self) -> None:
         """Validate configuration."""
         if not self.source.exists():
             raise ValueError(f"Source directory does not exist: {self.source}")
         if not self.source.is_dir():
             raise ValueError(f"Source is not a directory: {self.source}")
-        
+
         # Normalize extensions to lowercase
-        self.extensions = [ext.lower() if ext.startswith('.') else f'.{ext.lower()}' 
-                          for ext in self.extensions]
+        self.extensions = [
+            ext.lower() if ext.startswith(".") else f".{ext.lower()}" for ext in self.extensions
+        ]
