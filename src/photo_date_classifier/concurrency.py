@@ -3,7 +3,7 @@
 import os
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
+
 from typing import Callable, TypeVar
 
 from tqdm import tqdm
