@@ -1,62 +1,280 @@
 # Photo Date Classifier
 
-This Python script organizes digital raw photo files (DNG and CR2) into a folder structure based on their creation date. It uses multi-threading for improved performance, making it efficient for large collections of photos.
+A modern, robust Python package for organizing photos by date using EXIF metadata. Features include multi-threading, duplicate detection, configurable output structures, and comprehensive safety checks.
+
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Features
 
-- Recursively scans a source folder for DNG and CR2 files
-- Reads EXIF data to determine the creation date of each photo
-- Falls back to file modification time if EXIF data is unavailable
-- Organizes photos into a Year/Month folder structure
-- Uses multi-threading for faster processing
-- Provides a progress bar to track the sorting process
-- Option to update filenames with date and time information
-
-## Requirements
-
-- Python 3.x
-- exif library
-- tqdm library
+- **Smart Date Detection**: Prioritizes DateTimeOriginal, CreateDate, ModifyDate EXIF tags with fallback to file mtime
+- **Flexible Organization**: Configurable output structures using templates (Year/Month, Year/Camera/Month, custom patterns)
+- **Multiple RAW Formats**: Supports DNG, CR2, NEF, ARW, RAF, ORF, RW2, and optionally HEIC/JPEG
+- **Duplicate Detection**: Content-based (SHA-256) duplicate identification with configurable policies
+- **Safe Operations**: Copy-then-delete with fsync, collision handling, path sanitization
+- **Concurrent Processing**: Bounded thread pool with smart defaults based on system resources
+- **Dry Run Mode**: Preview changes before execution
+- **Progress Tracking**: Real-time progress bars and detailed logging
+- **Cross-Platform**: Windows, macOS, and Linux support with Unicode filename handling
+- **Type-Safe**: Full type hints and mypy strict mode
+- **Well-Tested**: Comprehensive test suite with >90% coverage
 
 ## Installation
 
-1. Clone this repository or download the script.
-2. Install the required libraries:
+### From Source
 
 ```bash
-pip install exif tqdm
-pip install exif exif
+git clone https://github.com/luis-rodriguez/photoclassification.git
+cd photoclassification
+pip install -e .
 ```
 
-## Usage
-Run the script from the command line, providing the path to the folder containing your photos as an argument:
+### For Development
 
 ```bash
-date-classifier.py /path/to/your/photo/folder [updatenames]
+pip install -e ".[dev]"
+pre-commit install
 ```
 
-Replace /path/to/your/photo/folder with the actual path to the folder containing your photos.
-The optional ´updatenames´ parameter, when included, will update the filenames to include the date and time information.
-How It Works
+## Quick Start
 
-- The script scans the provided folder and all its subfolders for DNG and CR2 files.
-- For each file, it attempts to read the creation date from the EXIF metadata.
-- If EXIF data is unavailable, it uses the file's modification time.
-- It creates a Year/Month folder structure in the source folder.
-- Each photo is copied to its corresponding Year/Month folder.
-- If the updatenames option is used, the filename is updated to the format: {yyyy-mm-dd-hhmmss}_{originalFileName}.{extension}
-- After successful copying, the original files are deleted from the source location.
-- The script uses multi-threading to process multiple files concurrently, significantly improving performance for large collections.
+### Basic Usage
 
-## Notes
+Organize photos from a source directory:
 
-This script will modify the file structure in the source folder. It's recommended to backup your files before running this script.
-The script preserves the original filenames of the photos unless the updatenames option is used.
-While designed for DNG and CR2 files, you can easily modify the script to include other raw formats by editing the file extension check in the get_raw_files function.
-The script now copies files to the new location and then deletes the originals, which can be faster in some situations, especially when moving files across different drives.
+```bash
+photo-date-classifier classify --source /path/to/photos --dest /path/to/organized
+```
+
+### With Custom Structure
+
+Organize by Year/Camera Model/Month:
+
+```bash
+photo-date-classifier classify \
+  --source /path/to/photos \
+  --dest /path/to/organized \
+  --structure "{year}/{camera_model}/{month}"
+```
+
+### Dry Run (Preview Changes)
+
+```bash
+photo-date-classifier classify \
+  --source /path/to/photos \
+  --dest /path/to/organized \
+  --dry-run
+```
+
+### Copy Instead of Move
+
+```bash
+photo-date-classifier classify \
+  --source /path/to/photos \
+  --dest /path/to/organized \
+  --operation copy
+```
+
+### Rename Files with Date
+
+```bash
+photo-date-classifier classify \
+  --source /path/to/photos \
+  --dest /path/to/organized \
+  --rename "{year}-{month}-{day}-{time}_{original}.{ext}"
+```
+
+## CLI Commands
+
+### `classify`
+
+Main command to organize photos:
+
+```bash
+photo-date-classifier classify [OPTIONS]
+```
+
+**Options:**
+- `--source, -s PATH`: Source directory (required)
+- `--dest, -d PATH`: Destination directory (required)
+- `--structure TEMPLATE`: Output structure template (default: `{year}/{month}`)
+- `--extensions LIST`: Comma-separated extensions (default: `.dng,.cr2,.nef,.arw,.raf,.orf,.rw2`)
+- `--rename PATTERN`: Rename pattern (optional)
+- `--operation TYPE`: Operation type: `move`, `copy`, `hardlink` (default: `move`)
+- `--dry-run`: Preview without making changes
+- `--concurrency, -j N`: Worker threads (0=auto, default: 0)
+- `--duplicate-policy POLICY`: Duplicate handling: `skip`, `keep-first`, `quarantine`, `manifest` (default: `skip`)
+- `--log-level LEVEL`: Logging level (default: `INFO`)
+- `--json`: Output results in JSON format
+- `--config PATH`: YAML configuration file
+
+### `plan`
+
+Generate a classification plan without making changes:
+
+```bash
+photo-date-classifier plan --source /path/to/photos --dest /path/to/organized
+```
+
+### `hash`
+
+Compute and list file hashes:
+
+```bash
+photo-date-classifier hash --directory /path/to/photos
+```
+
+## Structure Templates
+
+Templates support the following placeholders:
+
+- `{year}`: Four-digit year
+- `{month}`: Two-digit month
+- `{day}`: Two-digit day
+- `{hour}`, `{minute}`, `{second}`: Time components
+- `{camera_model}`: Camera model from EXIF (sanitized)
+- `{iso}`: ISO value
+- `{ext}`: File extension
+
+**Examples:**
+
+- `{year}/{month}` → `2023/10/`
+- `{year}/{month}/{day}` → `2023/10/21/`
+- `{year}/{camera_model}/{month}` → `2023/Canon EOS 5D/10/`
+
+## Configuration File
+
+You can use a YAML configuration file:
+
+```yaml
+# config.yaml
+source: /path/to/photos
+destination: /path/to/organized
+structure: "{year}/{camera_model}/{month}"
+extensions:
+  - .dng
+  - .cr2
+  - .nef
+concurrency: 8
+duplicate_policy: skip
+log_level: INFO
+```
+
+Then run:
+
+```bash
+photo-date-classifier classify --config config.yaml
+```
+
+## Duplicate Detection
+
+The tool can detect duplicates using content hashing (SHA-256) and metadata:
+
+- **skip**: Skip duplicate files (default)
+- **keep-first**: Keep first occurrence, skip duplicates
+- **quarantine**: Move duplicates to a separate folder
+- **manifest**: Create a CSV/JSONL manifest of duplicates
+
+## Safety Features
+
+- **Path Sanitization**: Prevents path traversal attacks
+- **Atomic Operations**: Copy-then-delete with fsync
+- **Collision Handling**: Automatic suffix appending for filename conflicts
+- **Idempotent**: Re-running is safe and won't duplicate work
+- **Error Recovery**: Continues on individual file errors
+
+## Performance Tips
+
+- Use `--concurrency` to control parallelism (default auto-detects optimal value)
+- Enable duplicate detection only when needed (adds hashing overhead)
+- Use `--dry-run` first to preview large operations
+- Consider `--operation copy` for initial organization, then cleanup manually
+
+## Legacy Script
+
+The original `date-classifier.py` script is deprecated but still available for compatibility. It now delegates to the new CLI with a deprecation warning:
+
+```bash
+python date-classifier.py /path/to/photos [updatenames]
+```
+
+**Recommended:** Migrate to `photo-date-classifier` command.
+
+## Development
+
+### Setup Development Environment
+
+```bash
+git clone https://github.com/luis-rodriguez/photoclassification.git
+cd photoclassification
+pip install -e ".[dev]"
+pre-commit install
+```
+
+### Run Tests
+
+```bash
+pytest
+```
+
+### Run Tests with Coverage
+
+```bash
+pytest --cov=photo_date_classifier --cov-report=html
+```
+
+### Linting and Formatting
+
+```bash
+# Format code
+black src/ tests/
+
+# Lint code
+ruff check src/ tests/
+
+# Type check
+mypy src/
+```
+
+### Security Checks
+
+```bash
+# Static analysis
+bandit -r src/
+
+# Dependency audit
+pip-audit
+```
+
+## Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for planned features:
+
+- Smart timezone correction
+- Sidecar XMP support
+- Watch mode (inotify/FSEvents)
+- GUI wrapper
+- Cloud storage backends (S3/GCS/Azure)
+- Persistent duplicate detection index (SQLite)
+- i18n support
 
 ## Contributing
-Feel free to fork this repository and submit pull requests with any enhancements.
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## Security
+
+For security concerns, please see [SECURITY.md](SECURITY.md).
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ## License
-MIT License
+
+MIT License - see [LICENSE](LICENSE) for details.
+
+## Acknowledgments
+
+- Original script by Luis Rodriguez
+- Built with: [Click](https://click.palletsprojects.com/), [exif](https://pypi.org/project/exif/), [tqdm](https://tqdm.github.io/)
