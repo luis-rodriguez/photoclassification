@@ -1,0 +1,56 @@
+# Example configuration file for photo-date-classifier
+# Usage: photo-date-classifier classify --config examples/config.yaml
+
+# Source directory containing photos to organize
+source: /path/to/photos
+
+# Destination directory for organized photos
+destination: /path/to/organized
+
+# Output structure template
+# Available placeholders: {year}, {month}, {day}, {camera_model}, {iso}, {ext}
+structure: "{year}/{month}"
+
+# Alternative structure examples:
+# structure: "{year}/{month}/{day}"
+# structure: "{year}/{camera_model}/{month}"
+# structure: "{year}/{month}/{camera_model}"
+
+# File extensions to process (case-insensitive)
+extensions:
+  - .dng
+  - .cr2
+  - .nef
+  - .arw
+  - .raf
+  - .orf
+  - .rw2
+  # Optionally include JPEG/HEIC:
+  # - .jpg
+  # - .jpeg
+  # - .heic
+
+# Rename pattern (optional)
+# Available placeholders: {year}, {month}, {day}, {time}, {original}, {ext}
+# rename: "{year}-{month}-{day}-{time}_{original}.{ext}"
+
+# File operation: move, copy, or hardlink
+operation: move
+
+# Dry run mode (preview without making changes)
+dry_run: false
+
+# Number of concurrent workers (0 = auto-detect)
+concurrency: 0
+
+# Duplicate handling policy: skip, keep-first, quarantine, or manifest
+duplicate_policy: skip
+
+# Follow symbolic links
+follow_symlinks: false
+
+# Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+log_level: INFO
+
+# JSON output for machine-readable results
+json_output: false
