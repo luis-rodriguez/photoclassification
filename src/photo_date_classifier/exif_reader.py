@@ -112,8 +112,8 @@ def extract_photo_metadata(file_path: Path) -> Photo:
         if hasattr(image, "photographic_sensitivity"):
             try:
                 photo.iso = int(image.photographic_sensitivity)
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as e:
+                logger.debug(f"Failed to parse ISO value from {file_path}: {e}")
 
     except Exception as e:
         logger.warning(f"Error reading EXIF from {file_path}: {e}")
